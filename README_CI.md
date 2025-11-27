@@ -24,9 +24,8 @@
 2. Выберите последний успешный workflow run
 3. Прокрутите вниз до секции **Artifacts**
 4. Нажмите на артефакт для скачивания:
-   - `windows-exe` - Windows исполняемый файл (.exe)
+   - `windows-exe` - Windows исполняемый файл (.exe) + все необходимые DLL
    - `linux-rpm` - Linux RPM пакет (.rpm)
-   - `linux-deb` - Linux DEB пакет (.deb)
 
 ### Где находится exe после сборки:
 
@@ -40,11 +39,34 @@ build/flutter/windows/build/runner/Release/csv_json_generator.exe
 csv_json_generator.exe
 ```
 
-## Создание Release
+## Автоматическое создание Release
 
-1. Создайте новый **Release** на GitHub
-2. Workflow автоматически соберет артефакты
-3. Файлы будут прикреплены к Release
+### Способ 1: Push тега (рекомендуется)
+
+1. Создайте и запушьте тег:
+   ```bash
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+
+2. Workflow автоматически:
+   - Соберет все артефакты (Windows .exe + DLL, Linux .rpm)
+   - Создаст Release с этим тегом
+   - Прикрепит все файлы к Release
+   - Сгенерирует release notes
+
+### Способ 2: Ручное создание Release
+
+1. Перейдите в раздел **Releases** на GitHub
+2. Нажмите **"Create a new release"**
+3. Укажите:
+   - **Tag version**: например `v1.0.0`
+   - **Release title**: например `Version 1.0.0`
+   - **Description**: описание изменений (опционально)
+4. Нажмите **"Publish release"**
+5. Workflow автоматически прикрепит артефакты к существующему Release
+
+**Важно:** После создания Release все файлы будут доступны для скачивания прямо на странице Release.
 
 ## Локальная сборка
 

@@ -3,6 +3,8 @@ name: Build Application
 on:
   push:
     branches: [ main, master ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main, master ]
   release:
@@ -147,42 +149,65 @@ jobs:
         if-no-files-found: warn
         retention-days: 30
 
-  build-linux-deb:
-    name: Build Linux .deb (Ubuntu/Debian)
+  create-release:
+    name: Create Release
+    needs: [build-windows, build-linux-rpm]
     runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'release' && github.event.action == 'created') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
     
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        fetch-depth: 0
     
-    - name: Install system dependencies
+    - name: Get version from tag
+      id: get_version
       run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential python3-dev python3-venv
+        if [ "${{ github.event_name }}" == "push" ]; then
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$VERSION" >> $GITHUB_OUTPUT
+        else
+          VERSION=${{ github.event.release.tag_name }}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$VERSION" >> $GITHUB_OUTPUT
+        fi
+        echo "Version: $VERSION"
     
-    - name: Install Python dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install briefcase flet
-    
-    - name: Create briefcase project
-      run: |
-        briefcase create || true
-    
-    - name: Build Linux .deb package
-      run: |
-        briefcase build || briefcase build linux || true
-        briefcase package --format deb || briefcase package linux --format deb || true
-    
-    - name: Upload Linux DEB artifact
-      uses: actions/upload-artifact@v4
+    - name: Download Windows artifacts
+      uses: actions/download-artifact@v4
       with:
-        name: linux-deb
-        path: dist/*.deb
-        if-no-files-found: warn
-        retention-days: 30
+        name: windows-exe
+        path: release/windows
+    
+    - name: Download Linux RPM artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: linux-rpm
+        path: release/linux
+        if-no-files-found: ignore
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.get_version.outputs.tag }}
+        name: Release ${{ steps.get_version.outputs.version }}
+        files: |
+          release/windows/**
+          release/linux/**
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        body: |
+          ## Что нового
+          
+          Автоматически собранные артефакты для версии ${{ steps.get_version.outputs.version }}
+          
+          ### Скачать
+          - **Windows**: Распакуйте архив `windows-exe` и запустите `csv_json_generator.exe`
+          - **Linux**: Установите `.rpm` пакет через `sudo dnf install *.rpm`
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
