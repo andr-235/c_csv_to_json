@@ -164,16 +164,35 @@ def main(page: ft.Page):
     try:
         page.window.min_width = 800
         page.window.min_height = 600
+        page.window.center()
         ui = AppUI(page)
     except Exception as e:
         import traceback
         error_msg = f"Ошибка при запуске приложения:\n{str(e)}\n\n{traceback.format_exc()}"
+        
+        try:
+            import os
+            log_dir = os.path.join(os.path.expanduser("~"), "csv_json_generator_logs")
+            os.makedirs(log_dir, exist_ok=True)
+            log_file = os.path.join(log_dir, "error.log")
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"\n{'='*50}\n")
+                f.write(f"UI Error: {error_msg}\n")
+        except:
+            pass
+        
         try:
             page.add(
                 ft.Text("Ошибка запуска", size=20, weight=ft.FontWeight.BOLD, color=ft.colors.RED),
-                ft.Text(error_msg, size=10, selectable=True),
+                ft.Text(error_msg, size=10, selectable=True, expand=True),
                 ft.ElevatedButton("Закрыть", on_click=lambda _: page.window.close())
             )
             page.update()
-        except:
-            pass
+        except Exception as ui_err:
+            try:
+                import os
+                log_file = os.path.join(os.path.expanduser("~"), "csv_json_generator_logs", "error.log")
+                with open(log_file, "a", encoding="utf-8") as f:
+                    f.write(f"\nUI Error display failed: {ui_err}\n")
+            except:
+                pass
