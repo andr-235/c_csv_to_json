@@ -236,6 +236,108 @@ jobs:
               Write-Host "  Copied data directory"
             }
             
+            # Check app.zip contents - Flet packages Python app in app.zip
+            Write-Host "`n=== Checking app.zip contents ==="
+            $appZipPath = Join-Path $dataDir "flutter_assets" "app" "app.zip"
+            if (Test-Path $appZipPath) {
+              Write-Host "Found app.zip: $appZipPath"
+              $zipSize = (Get-Item $appZipPath).Length
+              Write-Host "Size: $([math]::Round($zipSize/1MB, 2)) MB"
+              
+              # Try to extract and check contents
+              try {
+                Add-Type -AssemblyName System.IO.Compression.FileSystem
+                $zip = [System.IO.Compression.ZipFile]::OpenRead($appZipPath)
+                $entries = $zip.Entries | Select-Object -First 50
+                Write-Host "`nFirst 50 entries in app.zip:"
+                foreach ($entry in $entries) {
+                  Write-Host "  $($entry.FullName)"
+                }
+                Write-Host "`nTotal entries: $($zip.Entries.Count)"
+                
+                # Check for encodings in zip
+                $encodingsInZip = $zip.Entries | Where-Object { $_.FullName -like "*encodings*" } | Select-Object -First 10
+                if ($encodingsInZip) {
+                  Write-Host "`nFound encodings in app.zip:"
+                  $encodingsInZip | ForEach-Object { Write-Host "  $($_.FullName)" }
+                } else {
+                  Write-Host "`n⚠ WARNING: encodings module NOT found in app.zip!"
+                }
+                
+                # Check for Lib directory in zip
+                $libInZip = $zip.Entries | Where-Object { $_.FullName -like "Lib/*" } | Select-Object -First 20
+                if ($libInZip) {
+                  Write-Host "`nFound Lib directory entries in app.zip:"
+                  $libInZip | ForEach-Object { Write-Host "  $($_.FullName)" }
+                } else {
+                  Write-Host "`n⚠ WARNING: Lib directory NOT found in app.zip!"
+                }
+                
+                $zip.Dispose()
+              } catch {
+                Write-Host "Could not read app.zip: $_"
+              }
+            } else {
+              Write-Host "⚠ WARNING: app.zip not found at expected location: $appZipPath"
+            }
+            
+            # Search for Python runtime files in build directory
+            Write-Host "`n=== Searching for Python runtime files in build directory ==="
+            $buildRoot = Split-Path $exeDir -Parent -ErrorAction SilentlyContinue
+            $buildFlutter = Split-Path $buildRoot -Parent -ErrorAction SilentlyContinue
+            
+            # Search recursively for Python Lib directory
+            $pythonLibDirs = Get-ChildItem -Path $buildRoot -Recurse -Directory -Filter "Lib" -ErrorAction SilentlyContinue | Where-Object {
+              $_.Parent.Name -like "*python*" -or 
+              (Test-Path (Join-Path $_.FullName "encodings")) -or
+              (Get-ChildItem -Path $_.FullName -Filter "encodings" -Directory -ErrorAction SilentlyContinue)
+            } | Select-Object -First 5
+            
+            if ($pythonLibDirs) {
+              Write-Host "Found potential Python Lib directories:"
+              foreach ($libDir in $pythonLibDirs) {
+                Write-Host "  $($libDir.FullName)"
+                $encodingsCheck = Join-Path $libDir.FullName "encodings"
+                if (Test-Path $encodingsCheck) {
+                  Write-Host "    ✓ Contains encodings module"
+                  $destLib = Join-Path $packageDir "Lib"
+                  if (-not (Test-Path $destLib)) {
+                    Copy-Item -Path $libDir.FullName -Destination $destLib -Recurse -Force -ErrorAction SilentlyContinue
+                    Write-Host "    Copied to: $destLib"
+                  }
+                }
+              }
+            } else {
+              Write-Host "⚠ No Python Lib directories found in build"
+            }
+            
+            # Check for encodings module after copying
+            Write-Host "`n=== Final check for encodings module ==="
+            $encodingsPaths = @(
+              "$packageDir\Lib\encodings",
+              "$packageDir\Lib\encodings\__init__.py",
+              "$packageDir\python312.zip"
+            )
+            $foundEncodings = $false
+            foreach ($encPath in $encodingsPaths) {
+              if (Test-Path $encPath) {
+                Write-Host "✓ Found: $encPath"
+                $foundEncodings = $true
+              } else {
+                Write-Host "✗ MISSING: $encPath"
+              }
+            }
+            
+            if (-not $foundEncodings) {
+              Write-Host "`n❌ ERROR: encodings module not found! Python standard library is missing."
+              Write-Host "The application will fail at startup with: ModuleNotFoundError: No module named 'encodings'"
+              Write-Host "`nThis is a known issue with Flet build - Python standard library may not be included."
+              Write-Host "Possible solutions:"
+              Write-Host "  1. Check if Flet includes Python standard library in app.zip"
+              Write-Host "  2. Manually add Python Lib directory to the package"
+              Write-Host "  3. Report this as a bug to Flet project"
+            }
+            
             Write-Host "`nPackage prepared in: $packageDir"
             Get-ChildItem -Path $packageDir | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1KB, 2)) KB)" }
             
