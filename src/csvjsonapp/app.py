@@ -1,13 +1,12 @@
 # CSV to JSON Converter — Flet + Python
 
 import flet as ft
-import csv
-import json
-import os
-import re
-from pathlib import Path
-from abc import ABC, abstractmethod
-from typing import Optional, Dict, List
+from typing import Optional
+from csvjsonapp.interfaces import ILogger
+from csvjsonapp.photo_finder import PhotoFinder
+from csvjsonapp.template_processor import TemplateProcessor
+from csvjsonapp.logger import TextFieldLogger
+from csvjsonapp.json_generator import JSONGenerator
 
 DEFAULT_TEMPLATE = """{
     "id": "{id}",
@@ -15,168 +14,6 @@ DEFAULT_TEMPLATE = """{
     "email": "{email}",
     "photo_path": "{photo_path}"
 }"""
-
-
-class IPhotoFinder(ABC):
-    @abstractmethod
-    def find(self, photo_name: str, photos_folder: Path) -> str:
-        pass
-
-
-class PhotoFinder(IPhotoFinder):
-    def __init__(self, extensions: List[str] = None):
-        self.extensions = extensions or [".jpg", ".jpeg", ".png"]
-    
-    def find(self, photo_name: str, photos_folder: Path) -> str:
-        if not photo_name or not photos_folder.exists():
-            return ""
-        
-        photo_name_lower = photo_name.lower()
-        
-        for ext in self.extensions:
-            full_name = photo_name_lower + ext.lower()
-            for file in photos_folder.iterdir():
-                if file.name.lower() == full_name:
-                    return file.name
-            if photo_name_lower.endswith(ext.lower()):
-                for file in photos_folder.iterdir():
-                    if file.name.lower() == photo_name_lower:
-                        return file.name
-        
-        return ""
-
-
-class ITemplateProcessor(ABC):
-    @abstractmethod
-    def process(self, template: str, data: Dict[str, str], photo_path: Optional[str] = None) -> str:
-        pass
-
-
-class TemplateProcessor(ITemplateProcessor):
-    def process(self, template: str, data: Dict[str, str], photo_path: Optional[str] = None) -> str:
-        filled_template = template
-        
-        for key, value in data.items():
-            filled_template = filled_template.replace(f"{{{key}}}", str(value))
-        
-        if photo_path:
-            filled_template = filled_template.replace("{photo_path}", photo_path)
-        else:
-            filled_template = self._remove_photo_path(filled_template)
-        
-        return filled_template
-    
-    def _remove_photo_path(self, template: str) -> str:
-        template = re.sub(r',?\s*"photo_path"\s*:\s*"[^"]*"', '', template)
-        template = re.sub(r',?\s*"photo_path"\s*:\s*null', '', template)
-        template = re.sub(r',\s*}', '}', template)
-        template = re.sub(r'{\s*,', '{', template)
-        return template
-
-
-class ILogger(ABC):
-    @abstractmethod
-    def log(self, message: str) -> None:
-        pass
-
-
-class TextFieldLogger(ILogger):
-    def __init__(self, text_field: ft.TextField):
-        self.text_field = text_field
-    
-    def log(self, message: str) -> None:
-        self.text_field.value += f"\n{message}"
-        self.text_field.update()
-
-
-class CSVReader:
-    def __init__(self, csv_path: str):
-        if not os.path.exists(csv_path):
-            raise FileNotFoundError(f"CSV-файл не найден: {csv_path}")
-        self.csv_path = csv_path
-    
-    def read(self) -> List[Dict[str, str]]:
-        rows = []
-        with open(self.csv_path, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-        return rows
-
-
-class JSONFileWriter:
-    def __init__(self, output_dir: str = "output"):
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(exist_ok=True)
-    
-    def write(self, filename: str, data: Dict) -> None:
-        output_file = self.output_dir / filename
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-class JSONGenerator:
-    def __init__(
-        self,
-        template_processor: ITemplateProcessor,
-        photo_finder: IPhotoFinder,
-        logger: ILogger
-    ):
-        self.template_processor = template_processor
-        self.photo_finder = photo_finder
-        self.logger = logger
-    
-    def generate(
-        self,
-        csv_path: str,
-        photos_folder: Optional[str],
-        template_str: str
-    ) -> tuple[int, int]:
-        try:
-            csv_reader = CSVReader(csv_path)
-            rows = csv_reader.read()
-        except Exception as e:
-            self.logger.log(f"Ошибка при чтении CSV: {e}")
-            return 0, 1
-        
-        photos_path = Path(photos_folder) if photos_folder and os.path.exists(photos_folder) else None
-        writer = JSONFileWriter()
-        
-        created_count = 0
-        error_count = 0
-        
-        for row in rows:
-            try:
-                if "id" not in row:
-                    self.logger.log("Ошибка: В CSV отсутствует колонка 'id'")
-                    error_count += 1
-                    continue
-                
-                photo_name = row.get("photo", "")
-                found_photo = ""
-                if photo_name and photos_path:
-                    found_photo = self.photo_finder.find(photo_name, photos_path)
-                
-                processed_template = self.template_processor.process(
-                    template_str,
-                    row,
-                    found_photo if found_photo else None
-                )
-                
-                try:
-                    result = json.loads(processed_template)
-                except json.JSONDecodeError as e:
-                    self.logger.log(f"Ошибка JSON для строки {row.get('id', 'unknown')}: {e}")
-                    error_count += 1
-                    continue
-                
-                writer.write(f"{row['id']}.json", result)
-                created_count += 1
-                
-            except Exception as e:
-                error_count += 1
-                self.logger.log(f"Ошибка при обработке строки: {e}")
-        
-        return created_count, error_count
 
 
 class AppUI:
@@ -257,7 +94,7 @@ class AppUI:
         self.log_field.value += "\nНачало генерации..."
         self.log_field.update()
         
-        app = App(self.log_field)
+        app = App(TextFieldLogger(self.log_field))
         created, errors = app.generate(
             self.csv_file_path,
             self.photos_folder_path if self.photos_folder_path else None,
@@ -292,7 +129,3 @@ class App:
 
 def main(page: ft.Page):
     ui = AppUI(page)
-
-
-if __name__ == "__main__":
-    ft.app(target=main)
