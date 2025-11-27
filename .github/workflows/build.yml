@@ -71,6 +71,20 @@ jobs:
         Get-Location
         Write-Host "Directory contents:"
         Get-ChildItem | Select-Object Name, Length
+        Write-Host "`n=== Checking project structure ==="
+        Write-Host "main.py exists: $(Test-Path main.py)"
+        Write-Host "src directory exists: $(Test-Path src)"
+        if (Test-Path src) {
+          Write-Host "src/csvjsonapp exists: $(Test-Path src\csvjsonapp)"
+          $srcFiles = Get-ChildItem -Path src -Recurse -File -Include "*.py" | Where-Object { $_.FullName -notlike "*__pycache__*" }
+          Write-Host "Python files in src: $($srcFiles.Count)"
+          $srcFiles | Select-Object -First 10 | ForEach-Object { Write-Host "  $($_.FullName)" }
+        }
+        Write-Host "flet.json exists: $(Test-Path flet.json)"
+        if (Test-Path flet.json) {
+          Write-Host "flet.json contents:"
+          Get-Content flet.json
+        }
         Write-Host "`n=== Environment variables ==="
         Write-Host "PYTHONIOENCODING: $env:PYTHONIOENCODING"
         Write-Host "FLET_LOG_LEVEL: $env:FLET_LOG_LEVEL"
@@ -317,12 +331,97 @@ jobs:
                   Write-Host "`n⚠ WARNING: Lib directory NOT found in app.zip!"
                 }
                 
+                # Check for src directory in zip
+                $srcInZip = $zip.Entries | Where-Object { $_.FullName -like "src/*" -or $_.FullName -like "*/src/*" } | Select-Object -First 20
+                if ($srcInZip) {
+                  Write-Host "`n✓ Found src directory entries in app.zip:"
+                  $srcInZip | ForEach-Object { Write-Host "  $($_.FullName)" }
+                } else {
+                  Write-Host "`n⚠ WARNING: src directory NOT found in app.zip!"
+                  Write-Host "This will cause ModuleNotFoundError when running the app!"
+                }
+                
+                # Check for main.py in zip
+                $mainInZip = $zip.Entries | Where-Object { $_.FullName -like "*main.py*" } | Select-Object -First 5
+                if ($mainInZip) {
+                  Write-Host "`n✓ Found main.py in app.zip:"
+                  $mainInZip | ForEach-Object { Write-Host "  $($_.FullName)" }
+                } else {
+                  Write-Host "`n⚠ WARNING: main.py NOT found in app.zip!"
+                }
+                
                 $zip.Dispose()
               } catch {
                 Write-Host "Could not read app.zip: $_"
               }
             } else {
               Write-Host "⚠ WARNING: app.zip not found at expected location: $appZipPath"
+            }
+            
+            # Fix app.zip if src is missing
+            Write-Host "`n=== Checking and fixing app.zip if needed ==="
+            if (Test-Path $appZipPath) {
+              try {
+                Add-Type -AssemblyName System.IO.Compression.FileSystem
+                $zip = [System.IO.Compression.ZipFile]::OpenRead($appZipPath)
+                $srcInZip = $zip.Entries | Where-Object { $_.FullName -like "src/*" -or $_.FullName -like "*/src/*" } | Select-Object -First 1
+                $zip.Dispose()
+                
+                if (-not $srcInZip) {
+                  Write-Host "⚠ src directory missing in app.zip - attempting to fix..."
+                  $tempZip = $appZipPath + ".tmp"
+                  $zip = [System.IO.Compression.ZipFile]::Open($appZipPath, [System.IO.Compression.ZipArchiveMode]::Update)
+                  
+                  # Find source files in workspace
+                  $workspaceRoot = $env:GITHUB_WORKSPACE
+                  if (-not $workspaceRoot) {
+                    $workspaceRoot = Get-Location
+                  }
+                  
+                  $srcDir = Join-Path $workspaceRoot "src"
+                  if (Test-Path $srcDir) {
+                    Write-Host "Found src directory at: $srcDir"
+                    $srcFiles = Get-ChildItem -Path $srcDir -Recurse -File -Include "*.py","*.json" | Where-Object { $_.FullName -notlike "*__pycache__*" }
+                    Write-Host "Found $($srcFiles.Count) source files to add"
+                    
+                    foreach ($file in $srcFiles) {
+                      $relativePath = $file.FullName.Replace($workspaceRoot, "").TrimStart("\", "/")
+                      $entry = $zip.CreateEntry($relativePath)
+                      $entryStream = $entry.Open()
+                      $fileStream = [System.IO.File]::OpenRead($file.FullName)
+                      $fileStream.CopyTo($entryStream)
+                      $fileStream.Close()
+                      $entryStream.Close()
+                      Write-Host "  Added: $relativePath"
+                    }
+                    
+                    # Also add main.py if not present
+                    $mainPy = Join-Path $workspaceRoot "main.py"
+                    if (Test-Path $mainPy) {
+                      $mainEntry = $zip.GetEntry("main.py")
+                      if (-not $mainEntry) {
+                        $entry = $zip.CreateEntry("main.py")
+                        $entryStream = $entry.Open()
+                        $fileStream = [System.IO.File]::OpenRead($mainPy)
+                        $fileStream.CopyTo($entryStream)
+                        $fileStream.Close()
+                        $entryStream.Close()
+                        Write-Host "  Added: main.py"
+                      }
+                    }
+                    
+                    $zip.Dispose()
+                    Write-Host "✓ Fixed app.zip - src directory added"
+                  } else {
+                    Write-Host "✗ Cannot fix - src directory not found at: $srcDir"
+                    $zip.Dispose()
+                  }
+                } else {
+                  Write-Host "✓ app.zip already contains src directory"
+                }
+              } catch {
+                Write-Host "Could not fix app.zip: $_"
+              }
             }
             
             # Search for Python runtime files in build directory

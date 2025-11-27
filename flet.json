@@ -2,6 +2,9 @@
   "name": "CSV to JSON Generator",
   "version": "0.1.0",
   "description": "Конвертер CSV в JSON с поддержкой фотографий",
-  "entrypoint": "main.py"
+  "entrypoint": "main.py",
+  "includes": [
+    "src/**/*"
+  ]
 }
 

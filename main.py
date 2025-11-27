@@ -18,6 +18,16 @@ def log_error(error_msg: str):
 
 if __name__ == "__main__":
     try:
+        import src.csvjsonapp.app
+        import src.csvjsonapp.csv_reader
+        import src.csvjsonapp.json_generator
+        import src.csvjsonapp.json_writer
+        import src.csvjsonapp.logger
+        import src.csvjsonapp.photo_finder
+        import src.csvjsonapp.template_loader
+        import src.csvjsonapp.template_processor
+        import src.csvjsonapp.interfaces
+        
         current_dir = os.getcwd()
         
         if hasattr(sys, '_MEIPASS'):
@@ -42,6 +52,7 @@ if __name__ == "__main__":
                 sys.path.insert(0, base_dir)
         
         from src.csvjsonapp.app import main
+        
         import flet as ft
         ft.app(target=main)
     except Exception as e:
