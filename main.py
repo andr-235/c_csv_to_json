@@ -18,14 +18,28 @@ def log_error(error_msg: str):
 
 if __name__ == "__main__":
     try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
         current_dir = os.getcwd()
         
-        if os.path.exists(os.path.join(base_dir, "src")):
-            sys.path.insert(0, base_dir)
+        if hasattr(sys, '_MEIPASS'):
+            base_dir = sys._MEIPASS
+        else:
+            try:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+            except:
+                base_dir = current_dir
         
-        if os.path.exists(os.path.join(current_dir, "src")) and current_dir != base_dir:
-            sys.path.insert(0, current_dir)
+        possible_paths = [current_dir, base_dir]
+        for path_dir in possible_paths:
+            src_path = os.path.join(path_dir, "src", "csvjsonapp")
+            if os.path.exists(src_path):
+                if path_dir not in sys.path:
+                    sys.path.insert(0, path_dir)
+                break
+        else:
+            if current_dir not in sys.path:
+                sys.path.insert(0, current_dir)
+            if base_dir not in sys.path and base_dir != current_dir:
+                sys.path.insert(0, base_dir)
         
         from src.csvjsonapp.app import main
         import flet as ft

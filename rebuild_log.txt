@@ -1,8 +1,0 @@
-Rebuild completed successfully
-App zip: C:\Users\Andrey\Desktop\Новая папка\c_csv_to_json\windows-exe\data\flutter_assets\app\app.zip
-App zip exists: True
-App zip size: 38823 bytes
-Files in zip: 23
-Main files: 2
-  main.pyc
-  src/csvjsonapp/__pycache__/__main__.cpython-313.pyc
