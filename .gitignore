@@ -1,20 +1,42 @@
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
 .Python
+
+# Virtual environments
 venv/
 env/
 ENV/
+.venv
+
+# Build artifacts
 build/
 dist/
 *.egg-info/
-.DS_Store
+*.egg
+
+# Compiled files
 *.exe
 *.rpm
 *.deb
 *.msi
+
+# IDE
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
 .cache/
 .pytest_cache/
 .coverage
 htmlcov/
+.tox/
+
+# Flet/Flutter
+.flet/
