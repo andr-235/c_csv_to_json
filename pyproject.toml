@@ -1,6 +1,13 @@
 [build-system]
 requires = ["briefcase"]
 
+[project]
+name = "csv-json-generator"
+version = "0.1.0"
+description = "Конвертер CSV в JSON с поддержкой фотографий"
+requires-python = ">=3.8"
+dependencies = ["flet>=0.24.0"]
+
 [tool.briefcase]
 project_name = "CSV to JSON Generator"
 bundle = "com.csvjsonapp"
@@ -15,13 +22,12 @@ formal_name = "CSV to JSON Generator"
 description = "Конвертер CSV в JSON с поддержкой фотографий"
 sources = ["src/csvjsonapp"]
 requires = ["flet>=0.24.0"]
+startup_script = "csvjsonapp.__main__"
 
 [tool.briefcase.app.csvjsonapp.linux]
 requires = ["flet>=0.24.0"]
 
 [tool.briefcase.app.csvjsonapp.linux.rpm]
 requires = ["flet>=0.24.0"]
-
-[tool.briefcase.app.csvjsonapp.windows]
-requires = ["flet>=0.24.0"]
+license = "MIT"
 
