@@ -691,19 +691,18 @@ jobs:
           python3 --version
           echo '=== Installing Python packages ==='
           python3 -m pip install --upgrade pip 2>&1 | tee /tmp/pip_upgrade.log
-          pip3 install flet 2>&1 | tee /tmp/pip_install.log
+          pip3 install flet pyyaml 2>&1 | tee /tmp/pip_install.log
           echo '=== Flet version ==='
-          flet --version || python3 -m flet.cli --version || echo 'Flet not found'
+          python3 -m flet.cli --version || echo 'Flet not found'
+          echo '=== Configuring Git safe.directory ==='
+          git config --global --add safe.directory '*' || true
           echo '=== Current directory structure ==='
           ls -la /workspace/ || true
           echo '=== Building with Flet ==='
-          if ! flet build linux 2>&1 | tee /tmp/flet_build.log; then
-            echo 'Flet build failed, trying with python -m flet.cli...'
-            python3 -m flet.cli build linux 2>&1 | tee -a /tmp/flet_build.log || {
-              echo 'ERROR: Flet build failed'
-              cat /tmp/flet_build.log
-              exit 1
-            }
+          if ! python3 -m flet.cli build linux 2>&1 | tee /tmp/flet_build.log; then
+            echo 'ERROR: Flet build failed'
+            cat /tmp/flet_build.log | tail -100
+            exit 1
           fi
           echo '=== Checking build output ==='
           BUNDLE_DIR=''
