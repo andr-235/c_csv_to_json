@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import List
-from csvjsonapp.interfaces import IPhotoFinder
+from .interfaces import IPhotoFinder
 
 
 class PhotoFinder(IPhotoFinder):

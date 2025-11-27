@@ -2,12 +2,12 @@
 
 import flet as ft
 from typing import Optional
-from csvjsonapp.interfaces import ILogger
-from csvjsonapp.photo_finder import PhotoFinder
-from csvjsonapp.template_processor import TemplateProcessor
-from csvjsonapp.logger import TextFieldLogger
-from csvjsonapp.json_generator import JSONGenerator
-from csvjsonapp.template_loader import TemplateLoader
+from .interfaces import ILogger
+from .photo_finder import PhotoFinder
+from .template_processor import TemplateProcessor
+from .logger import TextFieldLogger
+from .json_generator import JSONGenerator
+from .template_loader import TemplateLoader
 
 
 class AppUI:

@@ -1,6 +1,6 @@
 import re
 from typing import Dict, Optional
-from csvjsonapp.interfaces import ITemplateProcessor
+from .interfaces import ITemplateProcessor
 
 
 class TemplateProcessor(ITemplateProcessor):

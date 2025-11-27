@@ -2,9 +2,9 @@ import json
 import os
 from pathlib import Path
 from typing import Optional
-from csvjsonapp.interfaces import IPhotoFinder, ITemplateProcessor, ILogger
-from csvjsonapp.csv_reader import CSVReader
-from csvjsonapp.json_writer import JSONFileWriter
+from .interfaces import IPhotoFinder, ITemplateProcessor, ILogger
+from .csv_reader import CSVReader
+from .json_writer import JSONFileWriter
 
 
 class JSONGenerator:

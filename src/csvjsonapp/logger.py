@@ -1,5 +1,5 @@
 import flet as ft
-from csvjsonapp.interfaces import ILogger
+from .interfaces import ILogger
 
 
 class TextFieldLogger(ILogger):
