@@ -165,11 +165,19 @@ def main(page: ft.Page):
         page.window.min_width = 800
         page.window.min_height = 600
         page.window.center()
+        
+        loading_text = ft.Text("Загрузка...", size=16)
+        page.add(loading_text)
+        page.update()
+        
         ui = AppUI(page)
         page.update()
     except Exception as e:
         import traceback
+        import sys
         error_msg = f"Ошибка при запуске приложения:\n{str(e)}\n\n{traceback.format_exc()}"
+        
+        print(f"UI ERROR: {error_msg}", file=sys.stderr, flush=True)
         
         try:
             import os
@@ -179,11 +187,10 @@ def main(page: ft.Page):
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"\n{'='*50}\n")
                 f.write(f"UI Error: {error_msg}\n")
-        except:
-            pass
+        except Exception as log_err:
+            print(f"Failed to write log: {log_err}", file=sys.stderr, flush=True)
         
         try:
-            # Clear page first
             page.clean()
             page.add(
                 ft.Text("Ошибка запуска", size=20, weight=ft.FontWeight.BOLD, color=ft.colors.RED),
@@ -192,6 +199,7 @@ def main(page: ft.Page):
             )
             page.update()
         except Exception as ui_err:
+            print(f"UI Error display failed: {ui_err}", file=sys.stderr, flush=True)
             try:
                 import os
                 log_file = os.path.join(os.path.expanduser("~"), "csv_json_generator_logs", "error.log")

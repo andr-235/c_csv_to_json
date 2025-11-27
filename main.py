@@ -11,72 +11,41 @@ def log_error(error_msg: str):
             f.write(f"\n{'='*50}\n")
             f.write(f"Error: {error_msg}\n")
             f.write(traceback.format_exc())
+        print(f"ERROR: {error_msg}", file=sys.stderr, flush=True)
+        print(traceback.format_exc(), file=sys.stderr, flush=True)
     except:
         pass
 
 if __name__ == "__main__":
     try:
-        log_error("Starting application...")
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        src_dir = os.path.join(base_dir, "src")
-        if os.path.exists(src_dir):
+        current_dir = os.getcwd()
+        
+        if os.path.exists(os.path.join(base_dir, "src")):
             sys.path.insert(0, base_dir)
         
-        # Add Lib directory to Python path if it exists (for built app)
-        lib_dir = os.path.join(base_dir, "Lib")
-        if os.path.exists(lib_dir):
-            sys.path.insert(0, lib_dir)
-            log_error(f"Added Lib directory to sys.path: {lib_dir}")
-        
-        log_error(f"Base dir: {base_dir}, sys.path: {sys.path[:5]}")
-        
-        # Test encodings import before proceeding
-        try:
-            import encodings
-            log_error("encodings module imported successfully")
-        except ImportError as ie:
-            error_msg = f"Ошибка импорта encodings: {ie}\nПроверьте наличие стандартной библиотеки Python."
-            log_error(error_msg)
-            try:
-                import flet as ft
-                def error_main(page: ft.Page):
-                    page.add(
-                        ft.Text("Ошибка запуска", size=20, weight=ft.FontWeight.BOLD, color=ft.colors.RED),
-                        ft.Text(error_msg, size=12, selectable=True, expand=True),
-                        ft.Text(f"\nBase dir: {base_dir}\nLib dir exists: {os.path.exists(lib_dir)}", size=10),
-                        ft.ElevatedButton("Закрыть", on_click=lambda _: page.window.close())
-                    )
-                    page.update()
-                ft.app(target=error_main)
-            except:
-                pass
-            sys.exit(1)
+        if os.path.exists(os.path.join(current_dir, "src")) and current_dir != base_dir:
+            sys.path.insert(0, current_dir)
         
         from src.csvjsonapp.app import main
         import flet as ft
-        log_error("Imports successful, starting Flet app...")
         ft.app(target=main)
     except Exception as e:
-        error_msg = f"Критическая ошибка: {e}"
+        error_msg = f"Критическая ошибка: {e}\n\n{traceback.format_exc()}"
         log_error(error_msg)
-        log_error(traceback.format_exc())
         try:
             import flet as ft
             def error_main(page: ft.Page):
+                page.window.width = 900
+                page.window.height = 700
                 page.add(
                     ft.Text("Ошибка запуска", size=20, weight=ft.FontWeight.BOLD, color=ft.colors.RED),
-                    ft.Text(error_msg, size=12, selectable=True, expand=True),
-                    ft.Text(traceback.format_exc(), size=10, selectable=True, expand=True),
+                    ft.Text(error_msg, size=10, selectable=True, expand=True),
                     ft.ElevatedButton("Закрыть", on_click=lambda _: page.window.close())
                 )
                 page.update()
             ft.app(target=error_main)
         except:
-            try:
-                print(error_msg)
-                print(traceback.format_exc())
-                input("Нажмите Enter для выхода...")
-            except:
-                pass
+            print(error_msg, file=sys.stderr, flush=True)
         sys.exit(1)
 
