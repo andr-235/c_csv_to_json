@@ -29,11 +29,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install flet
         Write-Host "Verifying Flet installation..."
-        python -c "import flet; print(f'Flet version: {flet.__version__}')"
         Write-Host "Checking if flet command is available..."
         $fletPath = Get-Command flet -ErrorAction SilentlyContinue
         if ($fletPath) {
           Write-Host "flet found at: $($fletPath.Source)"
+          Write-Host "Flet version:"
+          flet --version
         } else {
           Write-Host "flet not in PATH, adding Python Scripts to PATH..."
           $pythonPath = python -c "import sys; print(sys.executable)"
@@ -43,8 +44,12 @@ jobs:
           $fletPath = Get-Command flet -ErrorAction SilentlyContinue
           if ($fletPath) {
             Write-Host "flet found at: $($fletPath.Source)"
+            Write-Host "Flet version:"
+            flet --version
           } else {
             Write-Host "WARNING: flet command still not found"
+            Write-Host "Trying to verify via import..."
+            python -c "import flet; print('Flet module imported successfully')"
           }
         }
     
