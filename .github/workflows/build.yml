@@ -28,6 +28,25 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install flet
+        Write-Host "Verifying Flet installation..."
+        python -c "import flet; print(f'Flet version: {flet.__version__}')"
+        Write-Host "Checking if flet command is available..."
+        $fletPath = Get-Command flet -ErrorAction SilentlyContinue
+        if ($fletPath) {
+          Write-Host "flet found at: $($fletPath.Source)"
+        } else {
+          Write-Host "flet not in PATH, adding Python Scripts to PATH..."
+          $pythonPath = python -c "import sys; print(sys.executable)"
+          $scriptsPath = Join-Path (Split-Path $pythonPath -Parent) "Scripts"
+          $env:PATH = "$scriptsPath;$env:PATH"
+          Write-Host "Updated PATH, checking again..."
+          $fletPath = Get-Command flet -ErrorAction SilentlyContinue
+          if ($fletPath) {
+            Write-Host "flet found at: $($fletPath.Source)"
+          } else {
+            Write-Host "WARNING: flet command still not found"
+          }
+        }
     
     - name: Build Windows executable
       run: |
@@ -35,7 +54,14 @@ jobs:
         Write-Host "Python version:"
         python --version
         Write-Host "Flet version:"
-        python -m flet --version
+        # Try flet command, fallback to python -m flet.cli if not in PATH
+        $fletCmd = Get-Command flet -ErrorAction SilentlyContinue
+        if ($fletCmd) {
+          flet --version
+        } else {
+          Write-Host "flet not in PATH, trying python -m flet.cli..."
+          python -m flet.cli --version 2>&1 || python -c "import flet; print(f'Flet {flet.__version__}')"
+        }
         Write-Host "Current directory:"
         Get-Location
         Write-Host "Directory contents:"
@@ -47,15 +73,24 @@ jobs:
         Write-Host "Python version:"
         python --version
         Write-Host "Flet version:"
-        python -m flet --version
+        # Try flet command, fallback to python -m flet.cli if not in PATH
+        $fletCmd = Get-Command flet -ErrorAction SilentlyContinue
+        if ($fletCmd) {
+          flet --version
+          $fletBuildCmd = "flet"
+        } else {
+          Write-Host "flet not in PATH, trying python -m flet.cli..."
+          python -m flet.cli --version 2>&1 || python -c "import flet; print(f'Flet {flet.__version__}')"
+          $fletBuildCmd = "python -m flet.cli"
+        }
         
         # Set verbose environment variables
         $env:FLET_LOG_LEVEL = "DEBUG"
         $env:VERBOSE = "1"
         $env:FLUTTER_VERBOSE = "1"
         
-        # Run build via Python module and capture both stdout and stderr
-        $buildOutput = python -m flet build windows 2>&1 | Tee-Object -FilePath build_log.txt
+        # Run build and capture both stdout and stderr
+        $buildOutput = & $fletBuildCmd build windows 2>&1 | Tee-Object -FilePath build_log.txt
         
         # Also try to capture Flutter build logs
         if (Test-Path "build\flutter\windows\build\runner\Release\build.log") {
@@ -537,7 +572,7 @@ jobs:
           echo '=== Briefcase version ==='
           briefcase --version || echo 'Briefcase not found'
           echo '=== Flet version ==='
-          python3 -m flet --version || echo 'Flet not found'
+          flet --version || python3 -m flet.cli --version || echo 'Flet not found'
           echo '=== Current directory structure ==='
           ls -la /workspace/ || true
           echo '=== Creating briefcase project ==='
