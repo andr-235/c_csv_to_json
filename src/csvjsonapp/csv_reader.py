@@ -1,6 +1,6 @@
 import csv
 import os
-from typing import Dict, List
+from typing import Any, Dict, List
 
 
 class CSVReader:
@@ -13,6 +13,6 @@ class CSVReader:
         rows = []
         with open(self.csv_path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
-            rows = list(reader)
+            rows = list[dict[str | Any, str | Any]](reader)
         return rows
 

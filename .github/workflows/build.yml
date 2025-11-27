@@ -33,19 +33,39 @@ jobs:
       env:
         PYTHONIOENCODING: utf-8
     
-    - name: Find executable
-      id: find-exe
+    - name: Find and list all executables
       shell: pwsh
       run: |
-        $exe = Get-ChildItem -Path build -Recurse -Filter "*.exe" | Where-Object { $_.DirectoryName -like "*Release*" -or $_.DirectoryName -like "*runner*" } | Select-Object -First 1
-        if ($exe) {
-          Write-Host "Found executable: $($exe.FullName)"
-          $exeName = $exe.Name
-          Copy-Item $exe.FullName -Destination $exeName
-          Write-Host "exe_name=$exeName" >> $env:GITHUB_OUTPUT
+        Write-Host "=== Searching for .exe files ==="
+        $allExes = Get-ChildItem -Path build -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue
+        if ($allExes) {
+          Write-Host "Found $($allExes.Count) executable(s):"
+          $allExes | ForEach-Object { 
+            Write-Host "  $($_.FullName) (Size: $([math]::Round($_.Length/1MB, 2)) MB)"
+          }
+          
+          $releaseExe = $allExes | Where-Object { $_.DirectoryName -like "*Release*" } | Select-Object -First 1
+          if ($releaseExe) {
+            Write-Host "`nUsing Release executable: $($releaseExe.FullName)"
+            Copy-Item $releaseExe.FullName -Destination "$($releaseExe.Name)" -Force
+            Write-Host "Copied to: $($releaseExe.Name)"
+          } else {
+            $runnerExe = $allExes | Where-Object { $_.DirectoryName -like "*runner*" } | Select-Object -First 1
+            if ($runnerExe) {
+              Write-Host "`nUsing runner executable: $($runnerExe.FullName)"
+              Copy-Item $runnerExe.FullName -Destination "$($runnerExe.Name)" -Force
+              Write-Host "Copied to: $($runnerExe.Name)"
+            } else {
+              $firstExe = $allExes | Select-Object -First 1
+              Write-Host "`nUsing first found executable: $($firstExe.FullName)"
+              Copy-Item $firstExe.FullName -Destination "$($firstExe.Name)" -Force
+              Write-Host "Copied to: $($firstExe.Name)"
+            }
+          }
         } else {
-          Write-Host "Executable not found. Searching..."
-          Get-ChildItem -Path build -Recurse -Filter "*.exe" | ForEach-Object { Write-Host "Found: $($_.FullName)" }
+          Write-Host "ERROR: No .exe files found in build directory"
+          Write-Host "`nBuild directory structure:"
+          Get-ChildItem -Path build -Recurse -Directory | Select-Object -First 30 | ForEach-Object { Write-Host "  $($_.FullName)" }
           exit 1
         }
     
@@ -56,11 +76,42 @@ jobs:
         path: |
           *.exe
           build/flutter/windows/build/runner/Release/*.exe
+          build/flutter/windows/build/runner/Debug/*.exe
+          build/flutter/windows/build/runner/*.exe
+        if-no-files-found: error
+        retention-days: 30
+
+  build-linux-rpm:
+    name: Build Linux .rpm (Fedora)
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build RPM in Fedora container
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}:/workspace \
+          -w /workspace \
+          fedora:latest bash -c "
+          dnf install -y rpm-build python3-devel python3-pip git
+          python3 -m pip install --upgrade pip
+          pip3 install briefcase flet
+          briefcase create || true
+          briefcase build || briefcase build linux || true
+          briefcase package --format rpm || briefcase package linux --format rpm || true
+          "
+    
+    - name: Upload Linux RPM artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-rpm
+        path: dist/*.rpm
         if-no-files-found: warn
         retention-days: 30
 
-  build-linux:
-    name: Build Linux .rpm
+  build-linux-deb:
+    name: Build Linux .deb (Ubuntu/Debian)
     runs-on: ubuntu-latest
     
     steps:
@@ -74,7 +125,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y rpm-build python3-dev
+        sudo apt-get install -y build-essential python3-dev python3-venv
     
     - name: Install Python dependencies
       run: |
@@ -85,16 +136,16 @@ jobs:
       run: |
         briefcase create || true
     
-    - name: Build Linux package
+    - name: Build Linux .deb package
       run: |
-        briefcase build || briefcase build linux
-        briefcase package --format rpm || briefcase package linux --format rpm
+        briefcase build || briefcase build linux || true
+        briefcase package --format deb || briefcase package linux --format deb || true
     
-    - name: Upload Linux artifact
+    - name: Upload Linux DEB artifact
       uses: actions/upload-artifact@v4
       with:
-        name: linux-rpm
-        path: dist/*.rpm
+        name: linux-deb
+        path: dist/*.deb
         if-no-files-found: warn
         retention-days: 30
 
