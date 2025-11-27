@@ -337,6 +337,7 @@ jobs:
               (Get-ChildItem -Path $_.FullName -Filter "encodings" -Directory -ErrorAction SilentlyContinue)
             } | Select-Object -First 5
             
+            $libSourceDir = $null
             if ($pythonLibDirs) {
               Write-Host "Found potential Python Lib directories:"
               foreach ($libDir in $pythonLibDirs) {
@@ -344,6 +345,7 @@ jobs:
                 $encodingsCheck = Join-Path $libDir.FullName "encodings"
                 if (Test-Path $encodingsCheck) {
                   Write-Host "    ✓ Contains encodings module"
+                  $libSourceDir = $libDir
                   
                   # Count files before copying
                   $fileCount = (Get-ChildItem -Path $libDir.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
@@ -366,7 +368,17 @@ jobs:
                       $destEncodings = Join-Path $destLib "encodings"
                       if (Test-Path $destEncodings) {
                         $encodingsFiles = (Get-ChildItem -Path $destEncodings -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
-                        Write-Host "    ✓ encodings module copied: $encodingsFiles files"
+                        $encodingsInit = Join-Path $destEncodings "__init__.py"
+                        if (Test-Path $encodingsInit) {
+                          Write-Host "    ✓ encodings module copied: $encodingsFiles files (including __init__.py)"
+                        } else {
+                          Write-Host "    ⚠ encodings module copied: $encodingsFiles files (but __init__.py missing - checking source)..."
+                          $sourceInit = Join-Path $libDir.FullName "encodings\__init__.py"
+                          if (Test-Path $sourceInit) {
+                            Write-Host "    Copying __init__.py manually..."
+                            Copy-Item $sourceInit -Destination $encodingsInit -Force
+                          }
+                        }
                       } else {
                         Write-Host "    ✗ encodings module NOT copied!"
                       }
@@ -376,27 +388,68 @@ jobs:
                   } else {
                     Write-Host "    Lib already exists in package"
                   }
+                  break
                 }
               }
             } else {
               Write-Host "⚠ No Python Lib directories found in build"
             }
             
+            # Search for python312.zip (or python*.zip) in the same directory as Lib
+            Write-Host "`n=== Searching for Python standard library zip file ==="
+            if ($libSourceDir) {
+              $libParentDir = $libSourceDir.Parent
+              $pythonZipFiles = Get-ChildItem -Path $libParentDir -Filter "python*.zip" -ErrorAction SilentlyContinue
+              if ($pythonZipFiles) {
+                foreach ($zipFile in $pythonZipFiles) {
+                  Write-Host "Found: $($zipFile.FullName)"
+                  $destZip = Join-Path $packageDir $zipFile.Name
+                  Copy-Item $zipFile.FullName -Destination $destZip -Force
+                  Write-Host "  ✓ Copied to: $destZip"
+                }
+              } else {
+                Write-Host "⚠ No python*.zip file found in $libParentDir"
+                # Try searching in build directory
+                $allPythonZips = Get-ChildItem -Path $buildRoot -Recurse -Filter "python*.zip" -ErrorAction SilentlyContinue | Select-Object -First 3
+                if ($allPythonZips) {
+                  Write-Host "Found python*.zip files elsewhere:"
+                  foreach ($zipFile in $allPythonZips) {
+                    Write-Host "  $($zipFile.FullName)"
+                    $destZip = Join-Path $packageDir $zipFile.Name
+                    if (-not (Test-Path $destZip)) {
+                      Copy-Item $zipFile.FullName -Destination $destZip -Force
+                      Write-Host "    ✓ Copied to: $destZip"
+                    }
+                  }
+                }
+              }
+            } else {
+              Write-Host "⚠ Cannot search for python*.zip - Lib directory not found"
+            }
+            
             # Check for encodings module after copying
             Write-Host "`n=== Final check for encodings module ==="
-            $encodingsPaths = @(
-              "$packageDir\Lib\encodings",
-              "$packageDir\Lib\encodings\__init__.py",
-              "$packageDir\python312.zip"
-            )
+            $encodingsDir = Join-Path $packageDir "Lib\encodings"
+            $encodingsInit = Join-Path $encodingsDir "__init__.py"
+            $pythonZip = Get-ChildItem -Path $packageDir -Filter "python*.zip" -ErrorAction SilentlyContinue | Select-Object -First 1
+            
             $foundEncodings = $false
-            foreach ($encPath in $encodingsPaths) {
-              if (Test-Path $encPath) {
-                Write-Host "✓ Found: $encPath"
-                $foundEncodings = $true
+            if (Test-Path $encodingsDir) {
+              Write-Host "✓ Found: $encodingsDir"
+              $foundEncodings = $true
+              if (Test-Path $encodingsInit) {
+                Write-Host "✓ Found: $encodingsInit"
               } else {
-                Write-Host "✗ MISSING: $encPath"
+                Write-Host "✗ MISSING: $encodingsInit"
               }
+            } else {
+              Write-Host "✗ MISSING: $encodingsDir"
+            }
+            
+            if ($pythonZip) {
+              Write-Host "✓ Found: $($pythonZip.FullName)"
+            } else {
+              Write-Host "✗ MISSING: python*.zip"
             }
             
             if (-not $foundEncodings) {
