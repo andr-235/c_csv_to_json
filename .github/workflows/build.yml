@@ -33,7 +33,7 @@ jobs:
       env:
         PYTHONIOENCODING: utf-8
     
-    - name: Find and list all executables
+    - name: Find executable and prepare package
       shell: pwsh
       run: |
         Write-Host "=== Searching for .exe files ==="
@@ -45,22 +45,60 @@ jobs:
           }
           
           $releaseExe = $allExes | Where-Object { $_.DirectoryName -like "*Release*" } | Select-Object -First 1
+          if (-not $releaseExe) {
+            $releaseExe = $allExes | Where-Object { $_.DirectoryName -like "*runner*" } | Select-Object -First 1
+          }
+          if (-not $releaseExe) {
+            $releaseExe = $allExes | Select-Object -First 1
+          }
+          
           if ($releaseExe) {
-            Write-Host "`nUsing Release executable: $($releaseExe.FullName)"
-            Copy-Item $releaseExe.FullName -Destination "$($releaseExe.Name)" -Force
-            Write-Host "Copied to: $($releaseExe.Name)"
-          } else {
-            $runnerExe = $allExes | Where-Object { $_.DirectoryName -like "*runner*" } | Select-Object -First 1
-            if ($runnerExe) {
-              Write-Host "`nUsing runner executable: $($runnerExe.FullName)"
-              Copy-Item $runnerExe.FullName -Destination "$($runnerExe.Name)" -Force
-              Write-Host "Copied to: $($runnerExe.Name)"
+            Write-Host "`nUsing executable: $($releaseExe.FullName)"
+            $exeDir = $releaseExe.DirectoryName
+            $packageDir = "package"
+            New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+            
+            Write-Host "Copying executable..."
+            Copy-Item $releaseExe.FullName -Destination "$packageDir\$($releaseExe.Name)" -Force
+            
+            Write-Host "Copying all DLL files from $exeDir..."
+            $dlls = Get-ChildItem -Path $exeDir -Filter "*.dll" -ErrorAction SilentlyContinue
+            if ($dlls) {
+              Write-Host "Found $($dlls.Count) DLL file(s):"
+              $dlls | ForEach-Object {
+                Copy-Item $_.FullName -Destination "$packageDir\$($_.Name)" -Force
+                Write-Host "  Copied: $($_.Name)"
+              }
             } else {
-              $firstExe = $allExes | Select-Object -First 1
-              Write-Host "`nUsing first found executable: $($firstExe.FullName)"
-              Copy-Item $firstExe.FullName -Destination "$($firstExe.Name)" -Force
-              Write-Host "Copied to: $($firstExe.Name)"
+              Write-Host "WARNING: No DLL files found in $exeDir"
             }
+            
+            Write-Host "Searching for DLL files in parent directories..."
+            $parentDir = Split-Path $exeDir -Parent
+            $allDlls = Get-ChildItem -Path $parentDir -Recurse -Filter "*.dll" -ErrorAction SilentlyContinue | Where-Object { $_.DirectoryName -ne $exeDir }
+            if ($allDlls) {
+              Write-Host "Found $($allDlls.Count) additional DLL file(s):"
+              $allDlls | ForEach-Object {
+                $destPath = "$packageDir\$($_.Name)"
+                if (-not (Test-Path $destPath)) {
+                  Copy-Item $_.FullName -Destination $destPath -Force
+                  Write-Host "  Copied: $($_.Name) from $($_.DirectoryName)"
+                }
+              }
+            }
+            
+            Write-Host "Copying data directory if exists..."
+            $dataDir = Join-Path $exeDir "data"
+            if (Test-Path $dataDir) {
+              Copy-Item -Path $dataDir -Destination "$packageDir\data" -Recurse -Force
+              Write-Host "  Copied data directory"
+            }
+            
+            Write-Host "`nPackage prepared in: $packageDir"
+            Get-ChildItem -Path $packageDir | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1KB, 2)) KB)" }
+          } else {
+            Write-Host "ERROR: Could not find executable"
+            exit 1
           }
         } else {
           Write-Host "ERROR: No .exe files found in build directory"
@@ -74,10 +112,9 @@ jobs:
       with:
         name: windows-exe
         path: |
-          *.exe
-          build/flutter/windows/build/runner/Release/*.exe
-          build/flutter/windows/build/runner/Debug/*.exe
-          build/flutter/windows/build/runner/*.exe
+          package/*.exe
+          package/*.dll
+          package/data/**
         if-no-files-found: error
         retention-days: 30
 
