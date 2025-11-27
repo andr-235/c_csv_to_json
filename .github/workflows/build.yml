@@ -31,14 +31,48 @@ jobs:
     
     - name: Build Windows executable
       run: |
-        flet build windows
+        Write-Host "=== Starting Flet build ==="
+        Write-Host "Python version:"
+        python --version
+        Write-Host "Flet version:"
+        flet --version
+        Write-Host "Current directory:"
+        Get-Location
+        Write-Host "Directory contents:"
+        Get-ChildItem | Select-Object Name, Length
+        Write-Host "`n=== Running flet build windows ==="
+        $env:FLET_LOG_LEVEL = "DEBUG"
+        flet build windows 2>&1 | Tee-Object -FilePath build_log.txt
+        Write-Host "`n=== Build completed ==="
+        if (Test-Path build_log.txt) {
+          Write-Host "Build log saved to build_log.txt"
+          Get-Content build_log.txt -Tail 50
+        }
       env:
         PYTHONIOENCODING: utf-8
+        FLET_LOG_LEVEL: DEBUG
+    
+    - name: Upload build logs
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: build-logs
+        path: |
+          build_log.txt
+          build/**/*.log
+        retention-days: 7
     
     - name: Find executable and prepare package
       shell: pwsh
       run: |
         Write-Host "=== Searching for .exe files ==="
+        Write-Host "Build directory structure:"
+        if (Test-Path build) {
+          Get-ChildItem -Path build -Recurse -Directory | Select-Object -First 20 FullName | ForEach-Object { Write-Host "  $($_.FullName)" }
+        } else {
+          Write-Host "ERROR: Build directory does not exist!"
+          exit 1
+        }
         $allExes = Get-ChildItem -Path build -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue
         if ($allExes) {
           Write-Host "Found $($allExes.Count) executable(s):"
@@ -98,16 +132,72 @@ jobs:
             
             Write-Host "`nPackage prepared in: $packageDir"
             Get-ChildItem -Path $packageDir | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1KB, 2)) KB)" }
+            
+            Write-Host "`n=== Verifying executable ==="
+            $exePath = Join-Path $packageDir $releaseExe.Name
+            if (Test-Path $exePath) {
+              Write-Host "Executable found: $exePath"
+              $fileInfo = Get-Item $exePath
+              Write-Host "Size: $([math]::Round($fileInfo.Length/1MB, 2)) MB"
+              Write-Host "Last modified: $($fileInfo.LastWriteTime)"
+              
+              # Try to get file version info
+              try {
+                $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exePath)
+                Write-Host "File version: $($versionInfo.FileVersion)"
+                Write-Host "Product version: $($versionInfo.ProductVersion)"
+              } catch {
+                Write-Host "Could not read version info: $_"
+              }
+            } else {
+              Write-Host "ERROR: Executable not found at $exePath"
+              exit 1
+            }
           } else {
             Write-Host "ERROR: Could not find executable"
+            Write-Host "All found executables:"
+            $allExes | ForEach-Object { Write-Host "  $($_.FullName)" }
             exit 1
           }
         } else {
           Write-Host "ERROR: No .exe files found in build directory"
           Write-Host "`nBuild directory structure:"
-          Get-ChildItem -Path build -Recurse -Directory | Select-Object -First 30 | ForEach-Object { Write-Host "  $($_.FullName)" }
+          if (Test-Path build) {
+            Get-ChildItem -Path build -Recurse -Directory | Select-Object -First 30 | ForEach-Object { Write-Host "  $($_.FullName)" }
+            Write-Host "`nAll files in build directory:"
+            Get-ChildItem -Path build -Recurse -File | Select-Object -First 50 FullName | ForEach-Object { Write-Host "  $($_.FullName)" }
+          } else {
+            Write-Host "Build directory does not exist!"
+          }
+            exit 1
+        }
+    
+    - name: Test executable (basic check)
+      shell: pwsh
+      run: |
+        $exePath = Get-ChildItem -Path package -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($exePath) {
+          Write-Host "=== Testing executable: $($exePath.FullName) ==="
+          Write-Host "File exists: $(Test-Path $exePath.FullName)"
+          Write-Host "File size: $([math]::Round($exePath.Length/1MB, 2)) MB"
+          
+          # Check if it's a valid PE executable
+          $bytes = [System.IO.File]::ReadAllBytes($exePath.FullName)
+          if ($bytes.Length -ge 2) {
+            $peSignature = [System.Text.Encoding]::ASCII.GetString($bytes[0..1])
+            if ($peSignature -eq "MZ") {
+              Write-Host "✓ Valid PE executable (MZ signature found)"
+            } else {
+              Write-Host "⚠ Warning: File does not have MZ signature"
+            }
+          }
+          
+          Write-Host "Executable verification complete"
+        } else {
+          Write-Host "ERROR: No executable found in package directory"
           exit 1
         }
+      continue-on-error: true
     
     - name: Upload Windows artifact
       uses: actions/upload-artifact@v4
@@ -129,17 +219,64 @@ jobs:
     
     - name: Build RPM in Fedora container
       run: |
+        echo "=== Starting Linux RPM build ==="
+        echo "Workspace: ${{ github.workspace }}"
         docker run --rm \
           -v ${{ github.workspace }}:/workspace \
           -w /workspace \
           fedora:latest bash -c "
-          dnf install -y rpm-build python3-devel python3-pip git
-          python3 -m pip install --upgrade pip
-          pip3 install briefcase flet
-          briefcase create || true
-          briefcase build || briefcase build linux || true
-          briefcase package --format rpm || briefcase package linux --format rpm || true
+          set -x
+          echo '=== Installing dependencies ==='
+          dnf install -y rpm-build python3-devel python3-pip git 2>&1 | tee /tmp/dnf_install.log
+          echo '=== Python version ==='
+          python3 --version
+          echo '=== Installing Python packages ==='
+          python3 -m pip install --upgrade pip 2>&1 | tee /tmp/pip_upgrade.log
+          pip3 install briefcase flet 2>&1 | tee /tmp/pip_install.log
+          echo '=== Briefcase version ==='
+          briefcase --version || echo 'Briefcase not found'
+          echo '=== Flet version ==='
+          flet --version || echo 'Flet not found'
+          echo '=== Creating briefcase project ==='
+          briefcase create 2>&1 | tee /tmp/briefcase_create.log || echo 'Briefcase create failed, continuing...'
+          echo '=== Building project ==='
+          briefcase build 2>&1 | tee /tmp/briefcase_build.log || briefcase build linux 2>&1 | tee /tmp/briefcase_build.log || echo 'Build failed, continuing...'
+          echo '=== Packaging RPM ==='
+          briefcase package --format rpm 2>&1 | tee /tmp/briefcase_package.log || briefcase package linux --format rpm 2>&1 | tee /tmp/briefcase_package.log || echo 'Package failed'
+          echo '=== Build logs ==='
+          echo '--- DNF Install Log ---'
+          cat /tmp/dnf_install.log || true
+          echo '--- Briefcase Create Log ---'
+          cat /tmp/briefcase_create.log || true
+          echo '--- Briefcase Build Log ---'
+          cat /tmp/briefcase_build.log || true
+          echo '--- Briefcase Package Log ---'
+          cat /tmp/briefcase_package.log || true
+          echo '=== Checking for RPM files ==='
+          find /workspace -name '*.rpm' -type f 2>/dev/null | head -10
+          ls -lah /workspace/dist/ 2>/dev/null || echo 'dist directory not found'
           "
+    
+    - name: Check RPM build result
+      run: |
+        echo "=== Checking RPM build results ==="
+        if [ -d dist ]; then
+          echo "dist directory exists"
+          ls -lah dist/
+          RPM_COUNT=$(find dist -name "*.rpm" -type f | wc -l)
+          echo "Found $RPM_COUNT RPM file(s)"
+          if [ $RPM_COUNT -eq 0 ]; then
+            echo "WARNING: No RPM files found in dist/"
+            echo "Contents of dist/:"
+            ls -la dist/ || true
+          else
+            echo "RPM files:"
+            find dist -name "*.rpm" -type f -exec ls -lh {} \;
+          fi
+        else
+          echo "ERROR: dist directory does not exist"
+          exit 1
+        fi
     
     - name: Upload Linux RPM artifact
       uses: actions/upload-artifact@v4
@@ -184,10 +321,10 @@ jobs:
     
     - name: Download Linux RPM artifacts
       uses: actions/download-artifact@v4
+      continue-on-error: true
       with:
         name: linux-rpm
         path: release/linux
-        if-no-files-found: ignore
     
     - name: Create Release
       uses: softprops/action-gh-release@v1
