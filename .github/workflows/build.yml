@@ -40,17 +40,110 @@ jobs:
         Get-Location
         Write-Host "Directory contents:"
         Get-ChildItem | Select-Object Name, Length
-        Write-Host "`n=== Running flet build windows ==="
+        Write-Host "`n=== Environment variables ==="
+        Write-Host "PYTHONIOENCODING: $env:PYTHONIOENCODING"
+        Write-Host "FLET_LOG_LEVEL: $env:FLET_LOG_LEVEL"
+        Write-Host "`n=== Running flet build windows with verbose logging ==="
+        
+        # Set verbose environment variables
         $env:FLET_LOG_LEVEL = "DEBUG"
-        flet build windows 2>&1 | Tee-Object -FilePath build_log.txt
+        $env:VERBOSE = "1"
+        $env:FLUTTER_VERBOSE = "1"
+        
+        # Run build and capture both stdout and stderr
+        $buildOutput = flet build windows 2>&1 | Tee-Object -FilePath build_log.txt
+        
+        # Also try to capture Flutter build logs
+        if (Test-Path "build\flutter\windows\build\runner\Release\build.log") {
+          Write-Host "`n=== Flutter build log ==="
+          Get-Content "build\flutter\windows\build\runner\Release\build.log" -Tail 100 -ErrorAction SilentlyContinue
+        }
+        
+        # Check for CMake logs
+        $cmakeLogs = Get-ChildItem -Path build -Recurse -Filter "CMake*.log" -ErrorAction SilentlyContinue | Select-Object -First 5
+        if ($cmakeLogs) {
+          Write-Host "`n=== CMake logs found ==="
+          foreach ($log in $cmakeLogs) {
+            Write-Host "`n--- $($log.FullName) ---"
+            Get-Content $log.FullName -Tail 50 -ErrorAction SilentlyContinue
+          }
+        }
+        
         Write-Host "`n=== Build completed ==="
+        Write-Host "Exit code: $LASTEXITCODE"
         if (Test-Path build_log.txt) {
-          Write-Host "Build log saved to build_log.txt"
-          Get-Content build_log.txt -Tail 50
+          Write-Host "Build log saved to build_log.txt ($((Get-Item build_log.txt).Length) bytes)"
+          Write-Host "`n=== Last 100 lines of build log ==="
+          Get-Content build_log.txt -Tail 100
+        }
+        
+        # Check for errors in log
+        if (Test-Path build_log.txt) {
+          $errors = Select-String -Path build_log.txt -Pattern "error|Error|ERROR|failed|Failed|FAILED|exception|Exception" -CaseSensitive:$false
+          if ($errors) {
+            Write-Host "`n=== Potential errors/warnings in log ==="
+            $errors | Select-Object -First 20 | ForEach-Object { Write-Host $_.Line }
+          }
         }
       env:
         PYTHONIOENCODING: utf-8
         FLET_LOG_LEVEL: DEBUG
+        VERBOSE: 1
+        FLUTTER_VERBOSE: 1
+    
+    - name: Collect all build logs
+      shell: pwsh
+      if: always()
+      run: |
+        Write-Host "=== Collecting all build logs ==="
+        $logsDir = "build_logs"
+        New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+        
+        # Copy main build log
+        if (Test-Path build_log.txt) {
+          Copy-Item build_log.txt -Destination "$logsDir\flet_build.log" -Force
+          Write-Host "Copied: flet_build.log"
+        }
+        
+        # Find and copy all log files
+        $allLogs = Get-ChildItem -Path build -Recurse -Include "*.log","*.txt" -ErrorAction SilentlyContinue | Where-Object {
+          $_.Name -like "*log*" -or $_.Name -like "*error*" -or $_.Name -like "*build*"
+        }
+        
+        if ($allLogs) {
+          Write-Host "Found $($allLogs.Count) log file(s):"
+          foreach ($log in $allLogs) {
+            $relativePath = $log.FullName.Replace((Get-Location).Path + "\", "").Replace("\", "_")
+            $destPath = Join-Path $logsDir $relativePath
+            $destDir = Split-Path $destPath -Parent
+            if (-not (Test-Path $destDir)) {
+              New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+            }
+            Copy-Item $log.FullName -Destination $destPath -Force -ErrorAction SilentlyContinue
+            Write-Host "  Copied: $relativePath"
+          }
+        }
+        
+        # Copy CMake cache and config
+        $cmakeFiles = Get-ChildItem -Path build -Recurse -Include "CMakeCache.txt","CMakeFiles" -ErrorAction SilentlyContinue
+        if ($cmakeFiles) {
+          Write-Host "Found CMake files:"
+          foreach ($file in $cmakeFiles) {
+            if ($file.PSIsContainer) {
+              $relativePath = $file.FullName.Replace((Get-Location).Path + "\", "").Replace("\", "_")
+              Copy-Item $file.FullName -Destination "$logsDir\$relativePath" -Recurse -Force -ErrorAction SilentlyContinue
+            } else {
+              $relativePath = $file.FullName.Replace((Get-Location).Path + "\", "").Replace("\", "_")
+              Copy-Item $file.FullName -Destination "$logsDir\$relativePath" -Force -ErrorAction SilentlyContinue
+            }
+            Write-Host "  Copied: $relativePath"
+          }
+        }
+        
+        Write-Host "`n=== Logs summary ==="
+        Get-ChildItem -Path $logsDir -Recurse -File | ForEach-Object {
+          Write-Host "$($_.Name): $([math]::Round($_.Length/1KB, 2)) KB"
+        }
     
     - name: Upload build logs
       uses: actions/upload-artifact@v4
@@ -59,7 +152,9 @@ jobs:
         name: build-logs
         path: |
           build_log.txt
+          build_logs/**
           build/**/*.log
+          build/**/CMakeCache.txt
         retention-days: 7
     
     - name: Find executable and prepare package
