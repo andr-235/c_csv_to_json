@@ -35,7 +35,7 @@ jobs:
         Write-Host "Python version:"
         python --version
         Write-Host "Flet version:"
-        flet --version
+        python -m flet --version
         Write-Host "Current directory:"
         Get-Location
         Write-Host "Directory contents:"
@@ -44,14 +44,18 @@ jobs:
         Write-Host "PYTHONIOENCODING: $env:PYTHONIOENCODING"
         Write-Host "FLET_LOG_LEVEL: $env:FLET_LOG_LEVEL"
         Write-Host "`n=== Running flet build windows with verbose logging ==="
+        Write-Host "Python version:"
+        python --version
+        Write-Host "Flet version:"
+        python -m flet --version
         
         # Set verbose environment variables
         $env:FLET_LOG_LEVEL = "DEBUG"
         $env:VERBOSE = "1"
         $env:FLUTTER_VERBOSE = "1"
         
-        # Run build and capture both stdout and stderr
-        $buildOutput = flet build windows 2>&1 | Tee-Object -FilePath build_log.txt
+        # Run build via Python module and capture both stdout and stderr
+        $buildOutput = python -m flet build windows 2>&1 | Tee-Object -FilePath build_log.txt
         
         # Also try to capture Flutter build logs
         if (Test-Path "build\flutter\windows\build\runner\Release\build.log") {
@@ -300,10 +304,37 @@ jobs:
                 $encodingsCheck = Join-Path $libDir.FullName "encodings"
                 if (Test-Path $encodingsCheck) {
                   Write-Host "    ✓ Contains encodings module"
+                  
+                  # Count files before copying
+                  $fileCount = (Get-ChildItem -Path $libDir.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
+                  $dirCount = (Get-ChildItem -Path $libDir.FullName -Recurse -Directory -ErrorAction SilentlyContinue | Measure-Object).Count
+                  Write-Host "    Files: $fileCount, Directories: $dirCount"
+                  
                   $destLib = Join-Path $packageDir "Lib"
                   if (-not (Test-Path $destLib)) {
+                    Write-Host "    Copying Lib directory (this may take a while)..."
                     Copy-Item -Path $libDir.FullName -Destination $destLib -Recurse -Force -ErrorAction SilentlyContinue
-                    Write-Host "    Copied to: $destLib"
+                    
+                    # Verify copy
+                    if (Test-Path $destLib) {
+                      $copiedFiles = (Get-ChildItem -Path $destLib -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
+                      $copiedDirs = (Get-ChildItem -Path $destLib -Recurse -Directory -ErrorAction SilentlyContinue | Measure-Object).Count
+                      Write-Host "    ✓ Copied to: $destLib"
+                      Write-Host "    Copied files: $copiedFiles, directories: $copiedDirs"
+                      
+                      # Check encodings specifically
+                      $destEncodings = Join-Path $destLib "encodings"
+                      if (Test-Path $destEncodings) {
+                        $encodingsFiles = (Get-ChildItem -Path $destEncodings -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
+                        Write-Host "    ✓ encodings module copied: $encodingsFiles files"
+                      } else {
+                        Write-Host "    ✗ encodings module NOT copied!"
+                      }
+                    } else {
+                      Write-Host "    ✗ Copy failed - destination does not exist"
+                    }
+                  } else {
+                    Write-Host "    Lib already exists in package"
                   }
                 }
               }
@@ -339,7 +370,16 @@ jobs:
             }
             
             Write-Host "`nPackage prepared in: $packageDir"
-            Get-ChildItem -Path $packageDir | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1KB, 2)) KB)" }
+            Write-Host "`n=== Package contents summary ==="
+            Get-ChildItem -Path $packageDir | ForEach-Object { 
+              if ($_.PSIsContainer) {
+                $itemCount = (Get-ChildItem -Path $_.FullName -Recurse -ErrorAction SilentlyContinue | Measure-Object).Count
+                $size = (Get-ChildItem -Path $_.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+                Write-Host "  $($_.Name)/ (Items: $itemCount, Size: $([math]::Round($size/1MB, 2)) MB)"
+              } else {
+                Write-Host "  $($_.Name) ($([math]::Round($_.Length/1KB, 2)) KB)"
+              }
+            }
             
             Write-Host "`n=== Verifying executable ==="
             $exePath = Join-Path $packageDir $releaseExe.Name
@@ -466,6 +506,7 @@ jobs:
           package/*.exe
           package/*.dll
           package/data/**
+          package/Lib/**
         if-no-files-found: error
         retention-days: 30
 
@@ -496,7 +537,7 @@ jobs:
           echo '=== Briefcase version ==='
           briefcase --version || echo 'Briefcase not found'
           echo '=== Flet version ==='
-          flet --version || echo 'Flet not found'
+          python3 -m flet --version || echo 'Flet not found'
           echo '=== Current directory structure ==='
           ls -la /workspace/ || true
           echo '=== Creating briefcase project ==='
