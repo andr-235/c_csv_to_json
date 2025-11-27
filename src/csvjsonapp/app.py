@@ -166,6 +166,7 @@ def main(page: ft.Page):
         page.window.min_height = 600
         page.window.center()
         ui = AppUI(page)
+        page.update()
     except Exception as e:
         import traceback
         error_msg = f"Ошибка при запуске приложения:\n{str(e)}\n\n{traceback.format_exc()}"
@@ -182,6 +183,8 @@ def main(page: ft.Page):
             pass
         
         try:
+            # Clear page first
+            page.clean()
             page.add(
                 ft.Text("Ошибка запуска", size=20, weight=ft.FontWeight.BOLD, color=ft.colors.RED),
                 ft.Text(error_msg, size=10, selectable=True, expand=True),

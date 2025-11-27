@@ -355,14 +355,34 @@ jobs:
                   $destLib = Join-Path $packageDir "Lib"
                   if (-not (Test-Path $destLib)) {
                     Write-Host "    Copying Lib directory (this may take a while)..."
-                    Copy-Item -Path $libDir.FullName -Destination $destLib -Recurse -Force -ErrorAction SilentlyContinue
+                    Copy-Item -Path $libDir.FullName -Destination $destLib -Recurse -Force
                     
-                    # Verify copy
+                    # Verify copy and fix missing __init__.py files
                     if (Test-Path $destLib) {
                       $copiedFiles = (Get-ChildItem -Path $destLib -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
                       $copiedDirs = (Get-ChildItem -Path $destLib -Recurse -Directory -ErrorAction SilentlyContinue | Measure-Object).Count
                       Write-Host "    ✓ Copied to: $destLib"
                       Write-Host "    Copied files: $copiedFiles, directories: $copiedDirs"
+                      
+                      # Fix all missing __init__.py files
+                      Write-Host "    Checking and fixing __init__.py files..."
+                      $allDirs = Get-ChildItem -Path $destLib -Recurse -Directory -ErrorAction SilentlyContinue
+                      $fixedCount = 0
+                      foreach ($dir in $allDirs) {
+                        $initFile = Join-Path $dir.FullName "__init__.py"
+                        if (-not (Test-Path $initFile)) {
+                          $relativePath = $dir.FullName.Replace($destLib, "").TrimStart("\")
+                          $sourceDir = Join-Path $libDir.FullName $relativePath
+                          $sourceInit = Join-Path $sourceDir "__init__.py"
+                          if (Test-Path $sourceInit) {
+                            Copy-Item $sourceInit -Destination $initFile -Force
+                            $fixedCount++
+                          }
+                        }
+                      }
+                      if ($fixedCount -gt 0) {
+                        Write-Host "    ✓ Fixed $fixedCount missing __init__.py files"
+                      }
                       
                       # Check encodings specifically
                       $destEncodings = Join-Path $destLib "encodings"
@@ -372,12 +392,7 @@ jobs:
                         if (Test-Path $encodingsInit) {
                           Write-Host "    ✓ encodings module copied: $encodingsFiles files (including __init__.py)"
                         } else {
-                          Write-Host "    ⚠ encodings module copied: $encodingsFiles files (but __init__.py missing - checking source)..."
-                          $sourceInit = Join-Path $libDir.FullName "encodings\__init__.py"
-                          if (Test-Path $sourceInit) {
-                            Write-Host "    Copying __init__.py manually..."
-                            Copy-Item $sourceInit -Destination $encodingsInit -Force
-                          }
+                          Write-Host "    ⚠ encodings __init__.py still missing after fix attempt"
                         }
                       } else {
                         Write-Host "    ✗ encodings module NOT copied!"
@@ -387,6 +402,16 @@ jobs:
                     }
                   } else {
                     Write-Host "    Lib already exists in package"
+                    # Still check and fix __init__.py files
+                    $destEncodings = Join-Path $destLib "encodings"
+                    $encodingsInit = Join-Path $destEncodings "__init__.py"
+                    if (-not (Test-Path $encodingsInit)) {
+                      $sourceInit = Join-Path $libDir.FullName "encodings\__init__.py"
+                      if (Test-Path $sourceInit) {
+                        Write-Host "    Fixing missing encodings __init__.py..."
+                        Copy-Item $sourceInit -Destination $encodingsInit -Force
+                      }
+                    }
                   }
                   break
                 }
@@ -441,6 +466,19 @@ jobs:
                 Write-Host "✓ Found: $encodingsInit"
               } else {
                 Write-Host "✗ MISSING: $encodingsInit"
+                # Try to fix one more time if we have source
+                if ($libSourceDir) {
+                  $sourceInit = Join-Path $libSourceDir.FullName "encodings\__init__.py"
+                  if (Test-Path $sourceInit) {
+                    Write-Host "  Attempting final fix..."
+                    Copy-Item $sourceInit -Destination $encodingsInit -Force
+                    if (Test-Path $encodingsInit) {
+                      Write-Host "  ✓ Fixed: $encodingsInit"
+                    } else {
+                      Write-Host "  ✗ Fix failed"
+                    }
+                  }
+                }
               }
             } else {
               Write-Host "✗ MISSING: $encodingsDir"
@@ -450,6 +488,34 @@ jobs:
               Write-Host "✓ Found: $($pythonZip.FullName)"
             } else {
               Write-Host "✗ MISSING: python*.zip"
+            }
+            
+            # Final verification - check all critical __init__.py files
+            if ($foundEncodings -and (Test-Path (Join-Path $packageDir "Lib"))) {
+              Write-Host "`n=== Verifying critical Python modules ==="
+              $criticalModules = @("encodings", "collections", "io", "os", "sys")
+              foreach ($module in $criticalModules) {
+                $moduleDir = Join-Path (Join-Path $packageDir "Lib") $module
+                $moduleInit = Join-Path $moduleDir "__init__.py"
+                if (Test-Path $moduleDir) {
+                  if (Test-Path $moduleInit) {
+                    Write-Host "  ✓ $module"
+                  } else {
+                    Write-Host "  ✗ $module (missing __init__.py)"
+                    if ($libSourceDir) {
+                      $sourceInit = Join-Path $libSourceDir.FullName "$module\__init__.py"
+                      if (Test-Path $sourceInit) {
+                        Copy-Item $sourceInit -Destination $moduleInit -Force
+                        if (Test-Path $moduleInit) {
+                          Write-Host "    ✓ Fixed"
+                        }
+                      }
+                    }
+                  }
+                } else {
+                  Write-Host "  ✗ $module (directory missing)"
+                }
+              }
             }
             
             if (-not $foundEncodings) {
