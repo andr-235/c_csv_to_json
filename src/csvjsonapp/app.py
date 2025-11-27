@@ -31,7 +31,12 @@ class AppUI:
             value="Готов к работе\n"
         )
         
-        default_template = TemplateLoader.load_default()
+        try:
+            default_template = TemplateLoader.load_default()
+        except Exception as e:
+            default_template = '{\n    "id": "{id}",\n    "name": "{name}",\n    "email": "{email}",\n    "photo_path": "{photo_path}"\n}'
+            self.log_field.value += f"\nПредупреждение: не удалось загрузить шаблон по умолчанию: {e}\n"
+        
         self.template_field = ft.TextField(
             multiline=True,
             value=default_template,
@@ -156,4 +161,19 @@ class App:
 
 
 def main(page: ft.Page):
-    ui = AppUI(page)
+    try:
+        page.window.min_width = 800
+        page.window.min_height = 600
+        ui = AppUI(page)
+    except Exception as e:
+        import traceback
+        error_msg = f"Ошибка при запуске приложения:\n{str(e)}\n\n{traceback.format_exc()}"
+        try:
+            page.add(
+                ft.Text("Ошибка запуска", size=20, weight=ft.FontWeight.BOLD, color=ft.colors.RED),
+                ft.Text(error_msg, size=10, selectable=True),
+                ft.ElevatedButton("Закрыть", on_click=lambda _: page.window.close())
+            )
+            page.update()
+        except:
+            pass
