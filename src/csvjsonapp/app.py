@@ -7,13 +7,7 @@ from csvjsonapp.photo_finder import PhotoFinder
 from csvjsonapp.template_processor import TemplateProcessor
 from csvjsonapp.logger import TextFieldLogger
 from csvjsonapp.json_generator import JSONGenerator
-
-DEFAULT_TEMPLATE = """{
-    "id": "{id}",
-    "name": "{name}",
-    "email": "{email}",
-    "photo_path": "{photo_path}"
-}"""
+from csvjsonapp.template_loader import TemplateLoader
 
 
 class AppUI:
@@ -37,17 +31,19 @@ class AppUI:
             value="Готов к работе\n"
         )
         
+        default_template = TemplateLoader.load_default()
         self.template_field = ft.TextField(
             multiline=True,
-            value=DEFAULT_TEMPLATE,
+            value=default_template,
             expand=True,
             min_lines=10
         )
         
         self.file_picker = ft.FilePicker(on_result=self._on_csv_selected)
         self.folder_picker = ft.FilePicker(on_result=self._on_folder_selected)
+        self.template_picker = ft.FilePicker(on_result=self._on_template_selected)
         
-        self.page.overlay.extend([self.file_picker, self.folder_picker])
+        self.page.overlay.extend([self.file_picker, self.folder_picker, self.template_picker])
         
         self.page.add(
             ft.Text("CSV → JSON Generator", size=24, weight=ft.FontWeight.BOLD),
@@ -67,6 +63,19 @@ class AppUI:
                 ),
                 ft.ElevatedButton("Сгенерировать JSON", on_click=self._on_generate)
             ]),
+            ft.Row([
+                ft.ElevatedButton(
+                    "Загрузить шаблон JSON",
+                    on_click=lambda _: self.template_picker.pick_files(
+                        allowed_extensions=["json"],
+                        dialog_title="Выберите JSON-шаблон"
+                    )
+                ),
+                ft.ElevatedButton(
+                    "Сбросить шаблон",
+                    on_click=self._on_reset_template
+                )
+            ]),
             ft.Text("JSON-шаблон:", weight=ft.FontWeight.BOLD),
             self.template_field,
             ft.Text("Логи:", weight=ft.FontWeight.BOLD),
@@ -84,6 +93,25 @@ class AppUI:
             self.photos_folder_path = e.path
             self.log_field.value += f"Папка фото: {e.path}\n"
             self.log_field.update()
+    
+    def _on_template_selected(self, e: ft.FilePickerResultEvent) -> None:
+        if e.files and len(e.files) > 0:
+            try:
+                template_str = TemplateLoader.load_from_file(e.files[0].path)
+                self.template_field.value = template_str
+                self.template_field.update()
+                self.log_field.value += f"Загружен шаблон: {e.files[0].name}\n"
+                self.log_field.update()
+            except Exception as ex:
+                self.log_field.value += f"\nОшибка загрузки шаблона: {ex}\n"
+                self.log_field.update()
+    
+    def _on_reset_template(self, e) -> None:
+        default_template = TemplateLoader.load_default()
+        self.template_field.value = default_template
+        self.template_field.update()
+        self.log_field.value += "\nШаблон сброшен к значениям по умолчанию\n"
+        self.log_field.update()
     
     def _on_generate(self, e) -> None:
         if not self.csv_file_path:
