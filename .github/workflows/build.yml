@@ -145,6 +145,17 @@ jobs:
           Write-Host "$($_.Name): $([math]::Round($_.Length/1KB, 2)) KB"
         }
     
+    - name: Upload test logs
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-logs
+        path: |
+          test_output.txt
+          test_error.txt
+        if-no-files-found: ignore
+        retention-days: 7
+    
     - name: Upload build logs
       uses: actions/upload-artifact@v4
       if: always()
@@ -284,6 +295,57 @@ jobs:
               Write-Host "✓ Valid PE executable (MZ signature found)"
             } else {
               Write-Host "⚠ Warning: File does not have MZ signature"
+            }
+          }
+          
+          # Try to get dependencies using dumpbin if available
+          $dumpbinPath = "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe"
+          $dumpbin = Get-ChildItem -Path $dumpbinPath -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($dumpbin) {
+            Write-Host "`n=== Checking DLL dependencies ==="
+            $dependencies = & $dumpbin.FullName /dependents $exePath.FullName 2>&1
+            $dllList = $dependencies | Select-String -Pattern "\.dll" | ForEach-Object { $_.Line.Trim() }
+            if ($dllList) {
+              Write-Host "Required DLLs:"
+              $dllList | ForEach-Object { Write-Host "  $_" }
+              
+              # Check which DLLs are present in package
+              Write-Host "`nDLLs in package:"
+              $packageDlls = Get-ChildItem -Path package -Filter "*.dll" -ErrorAction SilentlyContinue
+              $packageDllNames = $packageDlls | ForEach-Object { $_.Name }
+              foreach ($dll in $dllList) {
+                if ($packageDllNames -contains $dll) {
+                  Write-Host "  ✓ $dll (found)"
+                } else {
+                  Write-Host "  ✗ $dll (MISSING)"
+                }
+              }
+            }
+          }
+          
+          Write-Host "`n=== Attempting test run (will timeout after 5 seconds) ==="
+          try {
+            $process = Start-Process -FilePath $exePath.FullName -WorkingDirectory $exePath.DirectoryName -PassThru -NoNewWindow -RedirectStandardOutput "test_output.txt" -RedirectStandardError "test_error.txt"
+            Start-Sleep -Seconds 5
+            if (-not $process.HasExited) {
+              Write-Host "Process is still running (good sign)"
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            } else {
+              Write-Host "Process exited with code: $($process.ExitCode)"
+              if (Test-Path "test_output.txt") {
+                Write-Host "`n=== Standard output ==="
+                Get-Content "test_output.txt" -ErrorAction SilentlyContinue
+              }
+              if (Test-Path "test_error.txt") {
+                Write-Host "`n=== Standard error ==="
+                Get-Content "test_error.txt" -ErrorAction SilentlyContinue
+              }
+            }
+          } catch {
+            Write-Host "Error running executable: $_"
+            if (Test-Path "test_error.txt") {
+              Write-Host "`n=== Error output ==="
+              Get-Content "test_error.txt" -ErrorAction SilentlyContinue
             }
           }
           
